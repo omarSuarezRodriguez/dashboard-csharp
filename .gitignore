@@ -1,0 +1,9 @@
+# Cursor / IDE artifacts (may contain secrets from terminal output)
+terminals/
+agent-tools/
+
+# Dependencies and secrets
+node_modules/
+.env
+*.log
+.DS_Store

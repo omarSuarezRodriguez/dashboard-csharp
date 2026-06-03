@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id                        String    @id @default(uuid())
+  slug                      String    @unique
+  name                      String
+  language                  String    @default("es")
+  timezone                  String    @default("America/Mexico_City")
+  twilioAccountSid          String    @map("twilio_account_sid")
+  twilioAuthTokenEncrypted  String    @map("twilio_auth_token_encrypted")
+  twilioWhatsappTo          String    @map("twilio_whatsapp_to")
+  webhookBaseUrl            String    @map("webhook_base_url")
+  settings                  Json      @default("{}")
+  setupCompletedAt          DateTime? @map("setup_completed_at")
+  isActive                  Boolean   @default(false) @map("is_active")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
+
+  conversations Conversation[]
+  messages      Message[]
+
+  @@map("tenants")
+}
+
+model Conversation {
+  tenantId          String   @map("tenant_id")
+  userPhone         String   @map("user_phone")
+  displayName       String?  @map("display_name")
+  step              String   @default("idle")
+  context           Json     @default("{}")
+  unknownCount      Int      @default(0) @map("unknown_count")
+  lastGreetingDate  DateTime? @db.Date @map("last_greeting_date")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, userPhone])
+  @@index([tenantId, userPhone])
+  @@map("conversations")
+}
+
+model Message {
+  id               String   @id @default(uuid())
+  tenantId         String   @map("tenant_id")
+  userPhone        String   @map("user_phone")
+  direction        String
+  body             String
+  twilioMessageSid String?  @unique @map("twilio_message_sid")
+  intent           String?
+  stepBefore       String?  @map("step_before")
+  stepAfter        String?  @map("step_after")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userPhone])
+  @@map("messages")
+}
