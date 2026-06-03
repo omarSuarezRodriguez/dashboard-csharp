@@ -8,6 +8,7 @@ import type {
 import { RuleBasedClassifier } from "./classifier.js";
 import { dispatchHandler } from "./handlers/index.js";
 import { normalizeForClassification, truncateReply } from "../domain/text.js";
+import { canonicalWhatsApp } from "../dashboard/phone.js";
 
 export class ProcessInboundMessage {
   constructor(
@@ -17,23 +18,32 @@ export class ProcessInboundMessage {
   ) {}
 
   async execute(input: InboundInput): Promise<ProcessResult> {
+    const userPhone = canonicalWhatsApp(input.from);
     const bodyOriginal = input.body ?? "";
     const bodyNormalized = normalizeForClassification(bodyOriginal);
     const stepBefore = (await this.conversations.findOrCreate(
       input.tenant.id,
-      input.from,
+      userPhone,
     )).step;
 
     let conversation = await this.conversations.findOrCreate(
       input.tenant.id,
-      input.from,
+      userPhone,
     );
 
     if (input.numMedia > 0 && !expectsMedia(conversation.step)) {
       const replyText = truncateReply(
         "Por ahora solo aceptamos mensajes de texto. Escribe tu consulta.",
       );
-      await this.persist(input, bodyOriginal, replyText, "unknown", stepBefore, conversation.step);
+      await this.persist(
+        input,
+        userPhone,
+        bodyOriginal,
+        replyText,
+        "unknown",
+        stepBefore,
+        conversation.step,
+      );
       return { replyText, intent: "unknown", stepBefore, stepAfter: conversation.step };
     }
 
@@ -56,6 +66,7 @@ export class ProcessInboundMessage {
 
     await this.persist(
       input,
+      userPhone,
       bodyOriginal,
       replyText,
       intent,
@@ -73,28 +84,33 @@ export class ProcessInboundMessage {
 
   private async persist(
     input: InboundInput,
+    userPhone: string,
     bodyOriginal: string,
     replyText: string,
     intent: string,
     stepBefore: string,
     stepAfter: string,
   ): Promise<void> {
+    const inboundAt = new Date();
     await this.messages.saveInbound({
       tenantId: input.tenant.id,
-      userPhone: input.from,
+      userPhone,
       body: bodyOriginal,
       messageSid: input.messageSid,
       intent,
       stepBefore,
       stepAfter,
+      createdAt: inboundAt,
     });
+    const outboundAt = new Date(Math.max(Date.now(), inboundAt.getTime() + 1));
     await this.messages.saveOutbound({
       tenantId: input.tenant.id,
-      userPhone: input.from,
+      userPhone,
       body: replyText,
       intent,
       stepBefore,
       stepAfter,
+      createdAt: outboundAt,
     });
   }
 }

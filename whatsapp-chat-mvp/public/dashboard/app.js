@@ -38,11 +38,10 @@ const SCROLL_BOTTOM_THRESHOLD = 80;
 const NOTIFY_DEBOUNCE_MS = 500;
 
 let seenLastMessageId = new Map();
+let seenLastInboundMessageId = new Map();
 let notificationsArmed = false;
-let audioContext = null;
 let audioUnlocked = false;
-let notificationBuffer = null;
-let notificationBufferPromise = null;
+let notifyAudioWarm = null;
 let suppressNotificationsUntil = 0;
 let openingChatPhone = null;
 let titleFlashTimer = null;
@@ -109,96 +108,49 @@ function setSyncLabel(text) {
   if (syncEl) syncEl.textContent = text;
 }
 
-function getAudioContext() {
-  if (!audioContext) {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (Ctx) audioContext = new Ctx();
-  }
-  return audioContext;
-}
-
 function isNotificationSuppressed() {
   return Date.now() < suppressNotificationsUntil || openingChatPhone != null;
 }
 
-async function loadNotificationBuffer() {
-  if (notificationBuffer) return notificationBuffer;
-  if (!notificationBufferPromise) {
-    notificationBufferPromise = (async () => {
-      const ctx = getAudioContext();
-      if (!ctx) throw new Error("AudioContext no disponible");
-      const res = await fetch(NOTIFICATION_SOUND);
-      if (!res.ok) throw new Error(`No se pudo cargar ${NOTIFICATION_SOUND}`);
-      const data = await res.arrayBuffer();
-      notificationBuffer = await ctx.decodeAudioData(data);
-      return notificationBuffer;
-    })();
-  }
-  return notificationBufferPromise;
+function initNotificationAudio() {
+  if (notifyAudioWarm) return;
+  notifyAudioWarm = new Audio(NOTIFICATION_SOUND);
+  notifyAudioWarm.preload = "auto";
+  notifyAudioWarm.load();
 }
 
-/** Primer clic: solo carga el MP3 en memoria, sin reproducir nada. */
+/** Primer clic en la página: desbloquea el navegador sin sonido audible. */
 async function unlockNotifications() {
   if (audioUnlocked) return;
+  initNotificationAudio();
+  const audio = notifyAudioWarm;
+  if (!audio) return;
+
+  audio.muted = true;
+  audio.volume = 1;
   try {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    if (ctx.state === "suspended") await ctx.resume();
-    await loadNotificationBuffer();
+    await audio.play();
+    audio.pause();
+    audio.currentTime = 0;
     audioUnlocked = true;
-  } catch (err) {
-    console.warn("[notificaciones] No se pudo preparar el sonido:", err);
-  }
-}
-
-/** Respaldo sintético si falla el MP3. */
-function playNotificationFallback() {
-  const ctx = getAudioContext();
-  if (!ctx) return;
-  if (ctx.state === "suspended") void ctx.resume();
-
-  const t0 = ctx.currentTime;
-  const master = ctx.createGain();
-  master.gain.value = 0.45;
-  master.connect(ctx.destination);
-
-  function pop(start, freq) {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.35, start + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.1);
-    osc.connect(gain);
-    gain.connect(master);
-    osc.start(start);
-    osc.stop(start + 0.11);
-  }
-
-  pop(t0, 880);
-  pop(t0 + 0.09, 1174.66);
-}
-
-/** Reproduce whatsapp-web.mp3 solo cuando llega un mensaje nuevo. */
-function playNotificationSound() {
-  if (!audioUnlocked || !notificationBuffer) return;
-
-  const ctx = getAudioContext();
-  if (!ctx) return;
-  if (ctx.state === "suspended") void ctx.resume();
-
-  try {
-    const source = ctx.createBufferSource();
-    source.buffer = notificationBuffer;
-    const gain = ctx.createGain();
-    gain.gain.value = 1;
-    source.connect(gain);
-    gain.connect(ctx.destination);
-    source.start(0);
   } catch {
-    playNotificationFallback();
+    audioUnlocked = true;
+  } finally {
+    audio.muted = false;
   }
+}
+
+/** Siempre el mismo whatsapp-web.mp3 precargado (sin tono sintético). */
+function playNotificationSound() {
+  initNotificationAudio();
+  const audio = notifyAudioWarm;
+  if (!audio) return;
+
+  audio.muted = false;
+  audio.volume = 1;
+  audio.pause();
+  audio.currentTime = 0;
+  void audio.play().catch(() => {});
 }
 
 function blinkChatPanel() {
@@ -307,14 +259,23 @@ function notifyNewMessage(phone) {
 
 function seedSeenMessages(list) {
   for (const c of list) {
-    if (c.lastMessageId) {
-      seenLastMessageId.set(c.userPhone, c.lastMessageId);
+    if (c.lastMessageId) seenLastMessageId.set(c.userPhone, c.lastMessageId);
+    if (c.lastInboundMessageId) {
+      seenLastInboundMessageId.set(c.userPhone, c.lastInboundMessageId);
     }
   }
 }
 
-/** Detecta mensaje nuevo en la lista (cliente o respuesta del bot). */
-function detectNewMessagesFromList(list) {
+function syncSeenIdsFromConversation(c) {
+  if (!c) return;
+  if (c.lastMessageId) seenLastMessageId.set(c.userPhone, c.lastMessageId);
+  if (c.lastInboundMessageId) {
+    seenLastInboundMessageId.set(c.userPhone, c.lastInboundMessageId);
+  }
+}
+
+/** Solo mensajes recibidos (inbound), no los que envías tú ni el bot. */
+function detectNewInboundFromList(list) {
   if (!notificationsArmed) {
     seedSeenMessages(list);
     notificationsArmed = true;
@@ -322,55 +283,57 @@ function detectNewMessagesFromList(list) {
   }
 
   if (isNotificationSuppressed()) {
-    for (const c of list) {
-      if (c.lastMessageId) seenLastMessageId.set(c.userPhone, c.lastMessageId);
-    }
+    for (const c of list) syncSeenIdsFromConversation(c);
     return;
   }
 
   for (const c of list) {
-    const prevId = seenLastMessageId.get(c.userPhone);
-    if (c.lastMessageId && prevId !== c.lastMessageId) {
+    const prevInbound = seenLastInboundMessageId.get(c.userPhone);
+    if (c.lastInboundMessageId && prevInbound !== c.lastInboundMessageId) {
       notifyNewMessage(c.userPhone);
     }
-    if (c.lastMessageId) {
-      seenLastMessageId.set(c.userPhone, c.lastMessageId);
-    }
+    syncSeenIdsFromConversation(c);
   }
 }
 
-function hasNewMessages(messages, prevIds) {
+function hasNewInboundMessages(messages, prevIds) {
   if (!notificationsArmed || !prevIds) return false;
-  return messages.some((m) => !prevIds.has(m.id));
+  return messages.some((m) => m.direction === "inbound" && !prevIds.has(m.id));
 }
 
 function notifyFromMessageDelta(phone, messages, prevIds) {
   if (openingChatPhone === phone) return;
-  if (!hasNewMessages(messages, prevIds)) return;
+  if (!hasNewInboundMessages(messages, prevIds)) return;
   notifyNewMessage(phone);
 }
 
 function buildMessageCache(messages, fp) {
+  const lastInbound = [...messages].reverse().find((m) => m.direction === "inbound");
   return {
     fingerprint: fp,
     ids: new Set(messages.map((m) => m.id)),
     lastId: messages.length ? messages[messages.length - 1].id : null,
+    lastInboundId: lastInbound?.id ?? null,
   };
 }
 
 function syncSeenMessageIdForPhone(phone) {
   const conv = conversations.find((c) => c.userPhone === phone);
-  if (conv?.lastMessageId) {
-    seenLastMessageId.set(phone, conv.lastMessageId);
+  if (conv) {
+    syncSeenIdsFromConversation(conv);
     return;
   }
-  const lastId = messagesCache[phone]?.lastId;
-  if (lastId) seenLastMessageId.set(phone, lastId);
+  const cache = messagesCache[phone];
+  if (cache?.lastId) seenLastMessageId.set(phone, cache.lastId);
+  if (cache?.lastInboundId) seenLastInboundMessageId.set(phone, cache.lastInboundId);
 }
 
 function listFingerprint(list) {
   return list
-    .map((c) => `${c.userPhone}|${c.updatedAt}|${c.preview}|${c.displayName}`)
+    .map(
+      (c) =>
+        `${c.userPhone}|${c.updatedAt}|${c.lastMessageId}|${c.preview}|${c.displayName}`,
+    )
     .join("\n");
 }
 
@@ -413,7 +376,7 @@ async function loadConversations() {
   const data = await api("/api/conversations");
   conversations = data.conversations ?? [];
   renderList();
-  detectNewMessagesFromList(conversations);
+  detectNewInboundFromList(conversations);
   setSyncLabel("Actualizado " + new Date().toLocaleTimeString("es-CO"));
 }
 
@@ -581,14 +544,10 @@ async function refreshMessages(options = {}) {
   if (!force && cache && messages.length >= cache.ids.size) {
     const newMessages = messages.filter((m) => !cache.ids.has(m.id));
     if (newMessages.length > 0) {
-      if (newMessages.length < messages.length) {
-        appendNewMessages(messages, phone, fp, newMessages, { wasAtBottom });
-      } else {
-        renderAllMessages(messages, phone, fp, {
-          wasAtBottom,
-          smooth: smoothScroll,
-        });
-      }
+      renderAllMessages(messages, phone, fp, {
+        wasAtBottom,
+        smooth: smoothScroll,
+      });
       notifyFromMessageDelta(phone, messages, prevIds);
       return;
     }
@@ -662,7 +621,7 @@ async function selectChat(phone, name) {
   suppressNotificationsUntil = Date.now() + 3000;
   openingChatPhone = phone;
   const conv = conversations.find((c) => c.userPhone === phone);
-  if (conv?.lastMessageId) seenLastMessageId.set(phone, conv.lastMessageId);
+  syncSeenIdsFromConversation(conv);
 
   clearConversationUnread(phone);
   selectedPhone = phone;
@@ -872,14 +831,34 @@ loadHealth()
 
 setInterval(tick, POLL_MS);
 
-function onFirstUserGesture() {
-  void unlockNotifications();
+function trySilentAutounlock() {
+  initNotificationAudio();
+  const audio = notifyAudioWarm;
+  if (!audio || audioUnlocked) return;
+  audio.muted = true;
+  audio.volume = 1;
+  const p = audio.play();
+  if (!p?.then) return;
+  p.then(() => {
+    audio.pause();
+    audio.currentTime = 0;
+    audio.muted = false;
+    audioUnlocked = true;
+  }).catch(() => {
+    audio.muted = false;
+  });
 }
 
-document.addEventListener("pointerdown", onFirstUserGesture, {
-  once: true,
-  passive: true,
-});
+initNotificationAudio();
+void trySilentAutounlock();
+
+document.addEventListener(
+  "pointerdown",
+  () => {
+    void unlockNotifications();
+  },
+  { once: true, passive: true },
+);
 
 listEl?.addEventListener(
   "mousedown",
@@ -889,7 +868,7 @@ listEl?.addEventListener(
     suppressNotificationsUntil = Date.now() + 3000;
     const phone = btn.dataset.phone;
     const conv = conversations.find((c) => c.userPhone === phone);
-    if (conv?.lastMessageId) seenLastMessageId.set(phone, conv.lastMessageId);
+    syncSeenIdsFromConversation(conv);
   },
   true,
 );

@@ -8,9 +8,36 @@ export interface ChatListItem {
   preview: string;
   updatedAt: string;
   lastMessageId: string | null;
+  lastInboundMessageId: string | null;
   lastDirection: "inbound" | "outbound" | null;
   unread: number;
   messageCount: number;
+}
+
+function messageDirection(
+  direction: string,
+): "inbound" | "outbound" | null {
+  if (direction === "inbound" || direction === "outbound") return direction;
+  return null;
+}
+
+function isNewerMessage(
+  msgCreatedAt: Date,
+  msgId: string,
+  msgDirection: string,
+  currentUpdatedAt: Date | null,
+  currentId: string | null,
+  currentDirection: "inbound" | "outbound" | null,
+): boolean {
+  if (!currentId || !currentUpdatedAt) return true;
+  const t = msgCreatedAt.getTime();
+  const cur = currentUpdatedAt.getTime();
+  if (t !== cur) return t > cur;
+
+  const dir = messageDirection(msgDirection);
+  if (dir === "outbound" && currentDirection === "inbound") return true;
+  if (dir === "inbound" && currentDirection === "outbound") return false;
+  return msgId > currentId;
 }
 
 export async function buildConversationList(tenantId: string): Promise<ChatListItem[]> {
@@ -20,7 +47,7 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
     prisma.conversation.findMany({ where: { tenantId } }),
     prisma.message.findMany({
       where: { tenantId },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: {
         id: true,
         userPhone: true,
@@ -37,8 +64,10 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
       userPhone: string;
       displayName: string | null;
       preview: string;
-      updatedAt: Date;
+      updatedAt: Date | null;
       lastMessageId: string | null;
+      lastInboundMessageId: string | null;
+      lastInboundAt: Date | null;
       lastDirection: "inbound" | "outbound" | null;
       inbound: number;
       messageCount: number;
@@ -49,34 +78,35 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
     if (isCorruptPhone(c.userPhone)) continue;
     const key = contactKey(c.userPhone);
     if (deletedKeys.has(key)) continue;
-    const canonical = canonicalWhatsApp(c.userPhone);
     buckets.set(key, {
-      userPhone: canonical,
+      userPhone: canonicalWhatsApp(c.userPhone),
       displayName: c.displayName,
       preview: "",
-      updatedAt: c.updatedAt,
+      updatedAt: null,
       lastMessageId: null,
+      lastInboundMessageId: null,
+      lastInboundAt: null,
       lastDirection: null,
       inbound: 0,
       messageCount: 0,
     });
   }
 
-  const latestMessageSet = new Set<string>();
-
   for (const m of messages) {
     if (isCorruptPhone(m.userPhone)) continue;
     const key = contactKey(m.userPhone);
     if (deletedKeys.has(key)) continue;
-    const canonical = canonicalWhatsApp(m.userPhone);
+
     let b = buckets.get(key);
     if (!b) {
       b = {
-        userPhone: canonical,
+        userPhone: canonicalWhatsApp(m.userPhone),
         displayName: null,
         preview: "",
-        updatedAt: m.createdAt,
+        updatedAt: null,
         lastMessageId: null,
+        lastInboundMessageId: null,
+        lastInboundAt: null,
         lastDirection: null,
         inbound: 0,
         messageCount: 0,
@@ -85,15 +115,38 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
     }
 
     b.messageCount++;
-    if (m.direction === "inbound") b.inbound++;
 
-    if (!latestMessageSet.has(key)) {
-      latestMessageSet.add(key);
+    if (m.direction === "inbound") {
+      b.inbound++;
+      if (
+        isNewerMessage(
+          m.createdAt,
+          m.id,
+          m.direction,
+          b.lastInboundAt,
+          b.lastInboundMessageId,
+          "inbound",
+        )
+      ) {
+        b.lastInboundMessageId = m.id;
+        b.lastInboundAt = m.createdAt;
+      }
+    }
+
+    if (
+      isNewerMessage(
+        m.createdAt,
+        m.id,
+        m.direction,
+        b.updatedAt,
+        b.lastMessageId,
+        b.lastDirection,
+      )
+    ) {
       b.preview = m.body.slice(0, 80);
       b.updatedAt = m.createdAt;
       b.lastMessageId = m.id;
-      b.lastDirection =
-        m.direction === "inbound" || m.direction === "outbound" ? m.direction : null;
+      b.lastDirection = messageDirection(m.direction);
     }
   }
 
@@ -101,8 +154,9 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
     userPhone: b.userPhone,
     displayName: resolveDisplayName(b.displayName, b.userPhone),
     preview: b.preview,
-    updatedAt: b.updatedAt.toISOString(),
+    updatedAt: (b.updatedAt ?? new Date(0)).toISOString(),
     lastMessageId: b.lastMessageId,
+    lastInboundMessageId: b.lastInboundMessageId,
     lastDirection: b.lastDirection,
     unread: b.inbound,
     messageCount: b.messageCount,

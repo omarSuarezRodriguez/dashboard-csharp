@@ -116,7 +116,9 @@ export class PrismaMessageRepository implements MessageRepository {
     intent?: string;
     stepBefore?: string;
     stepAfter?: string;
+    createdAt?: Date;
   }): Promise<void> {
+    const now = params.createdAt ?? new Date();
     await getPrisma().message.create({
       data: {
         tenantId: params.tenantId,
@@ -127,7 +129,15 @@ export class PrismaMessageRepository implements MessageRepository {
         intent: params.intent,
         stepBefore: params.stepBefore,
         stepAfter: params.stepAfter,
+        createdAt: now,
       },
+    });
+    await getPrisma().conversation.updateMany({
+      where: {
+        tenantId: params.tenantId,
+        userPhone: params.userPhone,
+      },
+      data: { updatedAt: now },
     });
   }
 
@@ -138,7 +148,9 @@ export class PrismaMessageRepository implements MessageRepository {
     intent?: string;
     stepBefore?: string;
     stepAfter?: string;
+    createdAt?: Date;
   }): Promise<void> {
+    const now = params.createdAt ?? new Date();
     await getPrisma().message.create({
       data: {
         tenantId: params.tenantId,
@@ -148,7 +160,15 @@ export class PrismaMessageRepository implements MessageRepository {
         intent: params.intent,
         stepBefore: params.stepBefore,
         stepAfter: params.stepAfter,
+        createdAt: now,
       },
+    });
+    await getPrisma().conversation.updateMany({
+      where: {
+        tenantId: params.tenantId,
+        userPhone: params.userPhone,
+      },
+      data: { updatedAt: now },
     });
   }
 }

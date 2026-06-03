@@ -50,6 +50,7 @@ export interface MessageRepository {
     intent?: string;
     stepBefore?: string;
     stepAfter?: string;
+    createdAt?: Date;
   }): Promise<void>;
   saveOutbound(params: {
     tenantId: string;
@@ -58,6 +59,7 @@ export interface MessageRepository {
     intent?: string;
     stepBefore?: string;
     stepAfter?: string;
+    createdAt?: Date;
   }): Promise<void>;
 }
 
