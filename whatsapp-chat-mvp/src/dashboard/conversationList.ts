@@ -7,6 +7,8 @@ export interface ChatListItem {
   displayName: string;
   preview: string;
   updatedAt: string;
+  lastMessageId: string | null;
+  lastDirection: "inbound" | "outbound" | null;
   unread: number;
   messageCount: number;
 }
@@ -20,6 +22,7 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
       where: { tenantId },
       orderBy: { createdAt: "desc" },
       select: {
+        id: true,
         userPhone: true,
         body: true,
         direction: true,
@@ -35,6 +38,8 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
       displayName: string | null;
       preview: string;
       updatedAt: Date;
+      lastMessageId: string | null;
+      lastDirection: "inbound" | "outbound" | null;
       inbound: number;
       messageCount: number;
     }
@@ -50,10 +55,14 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
       displayName: c.displayName,
       preview: "",
       updatedAt: c.updatedAt,
+      lastMessageId: null,
+      lastDirection: null,
       inbound: 0,
       messageCount: 0,
     });
   }
+
+  const latestMessageSet = new Set<string>();
 
   for (const m of messages) {
     if (isCorruptPhone(m.userPhone)) continue;
@@ -67,18 +76,25 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
         displayName: null,
         preview: "",
         updatedAt: m.createdAt,
+        lastMessageId: null,
+        lastDirection: null,
         inbound: 0,
         messageCount: 0,
       };
       buckets.set(key, b);
     }
+
     b.messageCount++;
     if (m.direction === "inbound") b.inbound++;
-    if (!b.preview) {
+
+    if (!latestMessageSet.has(key)) {
+      latestMessageSet.add(key);
       b.preview = m.body.slice(0, 80);
       b.updatedAt = m.createdAt;
+      b.lastMessageId = m.id;
+      b.lastDirection =
+        m.direction === "inbound" || m.direction === "outbound" ? m.direction : null;
     }
-    if (m.createdAt > b.updatedAt) b.updatedAt = m.createdAt;
   }
 
   const list: ChatListItem[] = [...buckets.values()].map((b) => ({
@@ -86,6 +102,8 @@ export async function buildConversationList(tenantId: string): Promise<ChatListI
     displayName: resolveDisplayName(b.displayName, b.userPhone),
     preview: b.preview,
     updatedAt: b.updatedAt.toISOString(),
+    lastMessageId: b.lastMessageId,
+    lastDirection: b.lastDirection,
     unread: b.inbound,
     messageCount: b.messageCount,
   }));

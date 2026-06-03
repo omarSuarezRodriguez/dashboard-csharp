@@ -1,5 +1,10 @@
 # csharp-final
 
+cd c:\Users\Usuario\Desktop\csharp-final\whatsapp-chat-mvp
+npm run dashboard
+
+
+
 Proyecto principal: **`whatsapp-chat-mvp/`**
 
 ## Panel WhatsApp (lo que necesitas)

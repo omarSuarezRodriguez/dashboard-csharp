@@ -379,6 +379,136 @@ body {
   border-bottom: 1px solid var(--wa-border);
   flex-shrink: 0;
   box-shadow: 0 1px 3px rgba(11, 20, 26, 0.2);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Notificación: mensaje entrante */
+.wa-main--notify {
+  animation: wa-main-ring 1.5s ease-out;
+}
+
+.wa-chat--notify-pulse {
+  animation: wa-chat-panel-pulse 1.5s ease-out;
+}
+
+.wa-chat--notify-pulse .wa-chat-head {
+  animation: wa-chat-head-pulse 1.5s ease-out;
+}
+
+.wa-chat--notify-pulse .wa-messages {
+  animation: wa-messages-glow 1.5s ease-out;
+}
+
+@keyframes wa-main-ring {
+  0%,
+  100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  20%,
+  55% {
+    box-shadow: inset 0 0 0 3px rgba(37, 211, 102, 0.75);
+  }
+  38% {
+    box-shadow: inset 0 0 0 1px rgba(37, 211, 102, 0.35);
+  }
+}
+
+@keyframes wa-chat-panel-pulse {
+  0%,
+  100% {
+    filter: none;
+  }
+  25%,
+  60% {
+    filter: brightness(1.12);
+  }
+}
+
+@keyframes wa-chat-head-pulse {
+  0%,
+  100% {
+    background-color: var(--wa-panel);
+    box-shadow: 0 1px 3px rgba(11, 20, 26, 0.2);
+  }
+  15%,
+  45%,
+  75% {
+    background-color: #1a3329;
+    box-shadow:
+      0 0 0 1px rgba(37, 211, 102, 0.35),
+      0 0 18px rgba(37, 211, 102, 0.2);
+  }
+  30%,
+  60% {
+    background-color: var(--wa-panel);
+    box-shadow: 0 1px 3px rgba(11, 20, 26, 0.2);
+  }
+}
+
+@keyframes wa-messages-glow {
+  0%,
+  100% {
+    filter: none;
+  }
+  20%,
+  50% {
+    filter: brightness(1.08);
+  }
+}
+
+/* Parpadeo suave hasta abrir el chat */
+.wa-conv--unread {
+  position: relative;
+  animation: wa-conv-unread-pulse 2.6s ease-in-out infinite;
+}
+
+.wa-conv--unread::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--wa-green-bright);
+  opacity: 0.85;
+  animation: wa-conv-unread-bar 2.6s ease-in-out infinite;
+}
+
+.wa-conv--unread .wa-conv-name {
+  font-weight: 500;
+  color: var(--wa-text);
+}
+
+.wa-conv--unread .wa-conv-time {
+  color: var(--wa-green-bright);
+  font-weight: 600;
+}
+
+.wa-conv--unread .wa-conv-preview {
+  color: #aebac1;
+}
+
+@keyframes wa-conv-unread-pulse {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(37, 211, 102, 0.11);
+  }
+}
+
+@keyframes wa-conv-unread-bar {
+  0%,
+  100% {
+    opacity: 0.5;
+    box-shadow: none;
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 10px rgba(37, 211, 102, 0.45);
+  }
 }
 
 .wa-chat-contact {

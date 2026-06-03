@@ -17,6 +17,8 @@
     "webhook:twilio": "tsx --env-file=.env scripts/set-whatsapp-webhook.ts",
     "send:test": "tsx --env-file=.env scripts/send-test.ts",
     "simulate": "tsx --env-file=.env scripts/simulate-inbound.ts",
+    "sounds:messenger": "node scripts/download-messenger-sound.mjs",
+    "sounds:whatsapp-web": "node scripts/download-whatsapp-web-sound.mjs",
     "go-live": "tsx --env-file=.env scripts/go-live.ts"
   },
   "dependencies": {
